@@ -1791,7 +1791,10 @@ async def kg_query(
         return context if context is not None else PROMPTS["fail_response"]
     if context is None:
         return PROMPTS["fail_response"]
-
+    
+    # print("CONTEXT for LLM: ", context)
+    # print("---------------------------context end---------------------------")
+    
     # Process conversation history
     history_context = ""
     if query_param.conversation_history:
@@ -1818,9 +1821,14 @@ async def kg_query(
 
     tokenizer: Tokenizer = global_config["tokenizer"]
     len_of_prompts = len(tokenizer.encode(query + sys_prompt))
+    len_of_history = len(tokenizer.encode(history_context))
     logger.debug(
         f"[kg_query] Sending to LLM: {len_of_prompts:,} tokens (Query: {len(tokenizer.encode(query))}, System: {len(tokenizer.encode(sys_prompt))})"
     )
+    print(
+        f"[kg_query] Sending to LLM: {len_of_prompts:,} tokens (Query: {len(tokenizer.encode(query))}, System: {len(tokenizer.encode(sys_prompt))} , History: {len_of_history})"
+    )
+    print("---------------------------Kg_query end---------------------------")
 
     response = await use_model_func(
         query,
@@ -3112,6 +3120,14 @@ async def naive_query(
 ```
 
 """
+    # print(f"""
+    # ---Document Chunks(DC)---
+
+    # ```json
+    # {text_units_str}
+    # ```
+
+    # """)
     # Process conversation history
     history_context = ""
     if query_param.conversation_history:
@@ -3137,9 +3153,14 @@ async def naive_query(
         return sys_prompt
 
     len_of_prompts = len(tokenizer.encode(query + sys_prompt))
+    len_history = len(tokenizer.encode(history_context))
     logger.debug(
-        f"[naive_query] Sending to LLM: {len_of_prompts:,} tokens (Query: {len(tokenizer.encode(query))}, System: {len(tokenizer.encode(sys_prompt))})"
+        f"[naive_query] Sending to LLM: {len_of_prompts:,} tokens (Query: {len(tokenizer.encode(query))}, System: {len(tokenizer.encode(sys_prompt))}, History: {len_history})"
     )
+    print(
+        f"[naive_query] Sending to LLM: {len_of_prompts:,} tokens (Query: {len(tokenizer.encode(query))}, System: {len(tokenizer.encode(sys_prompt))}, History: {len_history})"
+    )
+    print("-----------naive_query----------------------------")
 
     response = await use_model_func(
         query,

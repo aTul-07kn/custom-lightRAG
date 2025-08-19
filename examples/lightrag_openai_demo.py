@@ -6,9 +6,14 @@ from lightrag import LightRAG, QueryParam
 from lightrag.llm.openai import gpt_4o_mini_complete, openai_embed
 from lightrag.kg.shared_storage import initialize_pipeline_status
 from lightrag.utils import logger, set_verbose_debug
+from dotenv import load_dotenv
+import time
+import pathlib
+from docling.document_converter import DocumentConverter
 
-WORKING_DIR = "./dickens"
+load_dotenv()
 
+WORKING_DIR = "./bank_dir"
 
 def configure_logging():
     """Configure logging for the application"""
@@ -81,7 +86,9 @@ async def initialize_rag():
     rag = LightRAG(
         working_dir=WORKING_DIR,
         embedding_func=openai_embed,
-        llm_model_func=gpt_4o_mini_complete,
+        llm_model_func=gpt_4o_mini_complete,   
+        chunk_token_size=200,
+        chunk_overlap_token_size=40  
     )
 
     await rag.initialize_storages()
@@ -89,6 +96,20 @@ async def initialize_rag():
 
     return rag
 
+def pdf_to_txt(pdf_path: str, out_txt_path: str):
+    pdf_path = pathlib.Path(pdf_path)
+    out_txt_path = pathlib.Path(out_txt_path)
+
+    # Initialize converter
+    converter = DocumentConverter()
+    # Convert the document
+    result = converter.convert(str(pdf_path))
+    
+    out_txt_file = out_txt_path.with_suffix(".txt")
+    
+    text = result.document.export_to_text()
+    with out_txt_file.open("w", encoding="utf-8") as fp:
+        fp.write(text)
 
 async def main():
     # Check if OPENAI_API_KEY environment variable exists
@@ -112,69 +133,232 @@ async def main():
             "vdb_relationships.json",
         ]
 
-        for file in files_to_delete:
-            file_path = os.path.join(WORKING_DIR, file)
-            if os.path.exists(file_path):
-                os.remove(file_path)
-                print(f"Deleting old file:: {file_path}")
+        # for file in files_to_delete:
+        #     file_path = os.path.join(WORKING_DIR, file)
+        #     if os.path.exists(file_path):
+        #         os.remove(file_path)
+        #         print(f"Deleting old file:: {file_path}")
 
         # Initialize RAG instance
         rag = await initialize_rag()
 
         # Test embedding function
-        test_text = ["This is a test string for embedding."]
-        embedding = await rag.embedding_func(test_text)
-        embedding_dim = embedding.shape[1]
-        print("\n=======================")
-        print("Test embedding function")
-        print("========================")
-        print(f"Test dict: {test_text}")
-        print(f"Detected embedding dimension: {embedding_dim}\n\n")
+        # test_text = ["This is a test string for embedding."]
+        # embedding = await rag.embedding_func(test_text)
+        # embedding_dim = embedding.shape[1]
+        # print("\n=======================")
+        # print("Test embedding function")
+        # print("========================")
+        # print(f"Test dict: {test_text}")
+        # print(f"Detected embedding dimension: {embedding_dim}\n\n")
 
-        with open("./book.txt", "r", encoding="utf-8") as f:
-            await rag.ainsert(f.read())
+        # doc_file_path = 'bank.pdf'
 
-        # Perform naive search
+        # pdf_to_txt(doc_file_path, 'bank_output')
+        
+        # with open("./bank_output.txt", "r", encoding="utf-8") as f:
+        #     await rag.ainsert(f.read())
+        
+        # text_content_bytes = textract.process(doc_file_path)
+        # text_content = text_content_bytes.decode('utf-8')
+
+        # with open('bank_output.txt', 'w', encoding='utf-8') as f:
+        #     f.write(text_content)
+        
+        # await rag.ainsert(text_content)
+        
         print("\n=====================")
-        print("Query mode: naive")
+        print("Query mode: NAIVE")
         print("=====================")
+        
+        start_time = time.perf_counter()  # Start timing
+        
         print(
             await rag.aquery(
-                "What are the top themes in this story?", param=QueryParam(mode="naive")
+                "Find all borrowers who are jointly linked to more than one partner RE via the same CLA, and check which escrow banks serve as intermediaries.", param=QueryParam(mode="naive")
             )
         )
+        
+        end_time = time.perf_counter()  # End timing
 
-        # Perform local search
+        elapsed_time = end_time - start_time
+        print(f"Query execution time-1: {elapsed_time * 1000:.2f} ms")
+        print("----------------------------------------------------end of 1-answer----------------------------------------------------\n")
+        
+        
+        # # Perform local search
+        # print("\n=====================")
+        # print("Query mode: naive-2")
+        # print("=====================")
+        
+        # start_time = time.perf_counter()  # Start timing
+        
+        # print(
+        #     await rag.aquery(
+        #         "What is the overall message about social responsibility in this story?", param=QueryParam(mode="naive", top_k=80, chunk_top_k=15)
+        #     )
+        # )
+        
+        # end_time = time.perf_counter()  # End timing
+        
+        # elapsed_time = end_time - start_time
+        # print(f"Query execution time-2: {elapsed_time * 1000:.2f} ms")
+        # print("----------------------------------------------------end of 2-answer----------------------------------------------------\n")
+
+
         print("\n=====================")
-        print("Query mode: local")
+        print("Query mode: LOCAL")
         print("=====================")
+        
+        start_time = time.perf_counter()  # Start timing
+        
         print(
             await rag.aquery(
-                "What are the top themes in this story?", param=QueryParam(mode="local")
+                "Find all borrowers who are jointly linked to more than one partner RE via the same CLA, and check which escrow banks serve as intermediaries.", param=QueryParam(mode="local")
             )
         )
+        
+        end_time = time.perf_counter()  # End timing
 
-        # Perform global search
+        elapsed_time = end_time - start_time
+        print(f"Query execution time-1: {elapsed_time * 1000:.2f} ms")
+        print("----------------------------------------------------end of 1-answer----------------------------------------------------\n")
+        
+        
+        # # Perform local search
+        # print("\n=====================")
+        # print("Query mode: naive-2")
+        # print("=====================")
+        
+        # start_time = time.perf_counter()  # Start timing
+        
+        # print(
+        #     await rag.aquery(
+        #         "What does Tiny Tim say at the end of the story?", param=QueryParam(mode="naive", top_k=80, chunk_top_k=15)
+        #     )
+        # )
+        
+        # end_time = time.perf_counter()  # End timing
+        
+        # elapsed_time = end_time - start_time
+        # print(f"Query execution time-2: {elapsed_time * 1000:.2f} ms")
+        # print("----------------------------------------------------end of 2-answer----------------------------------------------------\n") 
+        
         print("\n=====================")
-        print("Query mode: global")
+        print("Query mode: GLOBAL")
         print("=====================")
+        
+        start_time = time.perf_counter()  # Start timing
+        
         print(
             await rag.aquery(
-                "What are the top themes in this story?",
-                param=QueryParam(mode="global"),
+                "Find all borrowers who are jointly linked to more than one partner RE via the same CLA, and check which escrow banks serve as intermediaries.", param=QueryParam(mode="global")
             )
         )
+        
+        end_time = time.perf_counter()  # End timing
 
-        # Perform hybrid search
+        elapsed_time = end_time - start_time
+        print(f"Query execution time-1: {elapsed_time * 1000:.2f} ms")
+        print("----------------------------------------------------end of 1-answer----------------------------------------------------\n")
+        
+        
+        # # Perform local search
+        # print("\n=====================")
+        # print("Query mode: naive-2")
+        # print("=====================")
+        
+        # start_time = time.perf_counter()  # Start timing
+        
+        # print(
+        #     await rag.aquery(
+        #         "Who are the three spirits that visit Scrooge?", param=QueryParam(mode="naive", top_k=80, chunk_top_k=15)
+        #     )
+        # )
+        
+        # end_time = time.perf_counter()  # End timing
+        
+        # elapsed_time = end_time - start_time
+        # print(f"Query execution time-2: {elapsed_time * 1000:.2f} ms")
+        # print("----------------------------------------------------end of 2-answer----------------------------------------------------\n")
+        
+        
         print("\n=====================")
-        print("Query mode: hybrid")
+        print("Query mode: HYBRID")
         print("=====================")
+        
+        start_time = time.perf_counter()  # Start timing
+        
         print(
             await rag.aquery(
-                "What are the top themes in this story?",
-                param=QueryParam(mode="hybrid"),
+                "Find all borrowers who are jointly linked to more than one partner RE via the same CLA, and check which escrow banks serve as intermediaries.", param=QueryParam(mode="hybrid")
             )
         )
+        
+        end_time = time.perf_counter()  # End timing
+
+        elapsed_time = end_time - start_time
+        print(f"Query execution time-1: {elapsed_time * 1000:.2f} ms")
+        print("----------------------------------------------------end of 1-answer----------------------------------------------------\n")
+        
+        
+        # # Perform local search
+        # print("\n=====================")
+        # print("Query mode: naive-2")
+        # print("=====================")
+        
+        # start_time = time.perf_counter()  # Start timing
+        
+        # print(
+        #     await rag.aquery(
+        #         "How is Tiny Tim related to other characters in the story?", param=QueryParam(mode="naive", top_k=80, chunk_top_k=15)
+        #     )
+        # )
+        
+        # end_time = time.perf_counter()  # End timing
+        
+        # elapsed_time = end_time - start_time
+        # print(f"Query execution time-2: {elapsed_time * 1000:.2f} ms")
+        # print("----------------------------------------------------end of 2-answer----------------------------------------------------\n")
+        
+        print("\n=====================")
+        print("Query mode: MIX")
+        print("=====================")
+        
+        start_time = time.perf_counter()  # Start timing
+        
+        print(
+            await rag.aquery(
+                "Find all borrowers who are jointly linked to more than one partner RE via the same CLA, and check which escrow banks serve as intermediaries.", param=QueryParam(mode="mix")
+            )
+        )
+        
+        end_time = time.perf_counter()  # End timing
+
+        elapsed_time = end_time - start_time
+        print(f"Query execution time-1: {elapsed_time * 1000:.2f} ms")
+        print("----------------------------------------------------end of 1-answer----------------------------------------------------\n")
+        
+        
+        # # Perform local search
+        # print("\n=====================")
+        # print("Query mode: naive-2")
+        # print("=====================")
+        
+        # start_time = time.perf_counter()  # Start timing
+        
+        # print(
+        #     await rag.aquery(
+        #         "What is the relationship between Scrooge and Jacob Marley?", param=QueryParam(mode="naive", top_k=80, chunk_top_k=15)
+        #     )
+        # )
+        
+        # end_time = time.perf_counter()  # End timing
+        
+        # elapsed_time = end_time - start_time
+        # print(f"Query execution time-2: {elapsed_time * 1000:.2f} ms")
+        # print("----------------------------------------------------end of 2-answer----------------------------------------------------\n")
+        
     except Exception as e:
         print(f"An error occurred: {e}")
     finally:

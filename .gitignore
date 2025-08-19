@@ -34,7 +34,7 @@ log/
 .gradio/
 .history/
 temp/
-
+bank_dir/
 # IDE / Editor Files
 .idea/
 .vscode/
