@@ -51,6 +51,7 @@ examples/input/
 examples/output/
 output*/
 data/
+.tmp_docling/
 
 # Miscellaneous
 .DS_Store

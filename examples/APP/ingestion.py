@@ -6,7 +6,7 @@ from typing import List
 
 from dotenv import load_dotenv
 load_dotenv()
-
+import uuid
 from docling.document_converter import DocumentConverter
 
 # LightRAG imports
@@ -75,26 +75,44 @@ def insert_text_into_rag(rag: LightRAG, text: str):
     return run_coro_threadsafe(_ainsert_text(rag, text))
 
 
-def pdf_bytes_to_text(pdf_bytes: bytes) -> str:
+def pdf_bytes_to_text(pdf_bytes: bytes, filename: str | None = None) -> str:
     """
-    Convert PDF bytes to plain text using Docling.
-    Saves temporary pdf under .tmp_docling and returns extracted text.
+    Convert PDF bytes to plain text using Docling and save the original PDF and the extracted text
+    into .tmp_docling. If filename is provided, use that filename (preserving original name).
+    This avoids writing a fixed upload.pdf/upload.txt pair.
+    Returns the extracted text.
     """
     tmp_dir = working_dir_for_tmp()
-    tmp_path = pathlib.Path(tmp_dir) / "upload.pdf"
-    tmp_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path.write_bytes(pdf_bytes)
 
+    # Use provided filename if present; otherwise generate a unique name.
+    if filename:
+        # sanitize filename a little (remove path parts)
+        base_name = os.path.basename(filename)
+    else:
+        base_name = f"doc_{uuid.uuid4().hex}.pdf"
+
+    # Ensure we have a .pdf extension
+    if not base_name.lower().endswith(".pdf"):
+        base_name = base_name + ".pdf"
+
+    pdf_path = pathlib.Path(tmp_dir) / base_name
+    pdf_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Write the PDF bytes directly to the per-file path
+    pdf_path.write_bytes(pdf_bytes)
+
+    # Convert with Docling using the real file path (Docling expects a path)
     converter = DocumentConverter()
-    result = converter.convert(str(tmp_path))
+    result = converter.convert(str(pdf_path))
+
     text = result.document.export_to_text()
 
     # Normalize whitespace a bit
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
 
-    # Save the .txt alongside so user can inspect
-    out_txt = tmp_path.with_suffix(".txt")
+    # Save the extracted text next to the PDF with the same basename
+    out_txt = pdf_path.with_suffix(".txt")
     out_txt.write_text(text, encoding="utf-8")
 
     return text

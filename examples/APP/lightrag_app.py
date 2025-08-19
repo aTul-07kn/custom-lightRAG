@@ -1,6 +1,7 @@
-# app.py
+# app.py (full file; replace your current app.py with this)
 import os
 import time
+import shutil
 import logging
 import asyncio
 import streamlit as st
@@ -62,6 +63,37 @@ def storages_exist(workdir: str) -> bool:
     return False
 
 
+def remove_and_recreate_dirs(workdir: str):
+    """
+    Remove the workdir (TEMP) and .tmp_docling directories if they exist, then recreate them empty.
+    """
+    # Remove TEMP (workdir)
+    try:
+        if os.path.exists(workdir):
+            shutil.rmtree(workdir)
+            logger.info("Deleted existing workdir: %s", workdir)
+    except Exception as e:
+        logger.warning("Failed to delete workdir %s: %s", workdir, e)
+
+    # Remove .tmp_docling under project root
+    tmp_docling = os.path.join(os.getcwd(), ".tmp_docling")
+    try:
+        if os.path.exists(tmp_docling):
+            shutil.rmtree(tmp_docling)
+            logger.info("Deleted existing .tmp_docling: %s", tmp_docling)
+    except Exception as e:
+        logger.warning("Failed to delete .tmp_docling %s: %s", tmp_docling, e)
+
+    # Recreate fresh directories
+    try:
+        os.makedirs(workdir, exist_ok=True)
+        os.makedirs(tmp_docling, exist_ok=True)
+        logger.info("Recreated directories: %s and %s", workdir, tmp_docling)
+    except Exception as e:
+        logger.error("Failed to recreate directories: %s", e)
+        raise
+
+
 # Settings expander
 with st.expander("⚙️ Settings", expanded=False):
     chunk_size = st.number_input("Chunk token size", min_value=50, max_value=1000, value=200, step=10)
@@ -74,40 +106,50 @@ with st.expander("⚙️ Settings", expanded=False):
 st.header("1) Ingest PDF(s) into Knowledge Base")
 uploaded_files = st.file_uploader("Upload PDF(s)", type=["pdf"], accept_multiple_files=True)
 
-btn_col_left, btn_col_right = st.columns([1, 1])
-with btn_col_left:
-    process_btn = st.button("Process Uploaded PDFs", disabled=(not uploaded_files))
-with btn_col_right:
-    reset_btn = st.button("Reset KB and Session")
-
-if reset_btn:
-    logger.info("Resetting KB and session...")
-    clear_workdir_files(st.session_state.workdir)
-    st.session_state.rag = None
-    st.session_state.ingested_files.clear()
-    st.experimental_rerun()
+# Single full-width button for processing (reset button removed per request)
+process_btn = st.button("Process Uploaded PDFs", disabled=(not uploaded_files))
 
 if process_btn and uploaded_files:
-    os.makedirs(st.session_state.workdir, exist_ok=True)
-    # Build RAG (this uses the background loop under the hood)
-    if st.session_state.rag is None:
-        logger.info("Initializing RAG for the first time...")
-        st.session_state.rag = build_rag(
-            working_dir=st.session_state.workdir,
-            chunk_token_size=chunk_size,
-            chunk_overlap_token_size=chunk_overlap,
-        )
+    # Delete existing TEMP and .tmp_docling, reset state, create fresh dirs
+    logger.info("New upload detected — removing existing TEMP and .tmp_docling and recreating fresh directories.")
+    remove_and_recreate_dirs(st.session_state.workdir)
 
+    # Clear any LightRAG references in session state (fresh run)
+    st.session_state.rag = None
+    st.session_state.ingested_files = set()
+
+    # Build RAG (this uses the background loop under the hood)
+    logger.info("Initializing RAG for ingestion...")
+    st.session_state.rag = build_rag(
+        working_dir=st.session_state.workdir,
+        chunk_token_size=chunk_size,
+        chunk_overlap_token_size=chunk_overlap,
+    )
+
+    # Ensure tmp_docling path
+    tmp_docling_dir = os.path.join(os.getcwd(), ".tmp_docling")
+    os.makedirs(tmp_docling_dir, exist_ok=True)
+
+    # Ingest each uploaded PDF; pdf_bytes_to_text now saves per-file pdf & txt into .tmp_docling
     for pdf_file in uploaded_files:
-        if pdf_file.name not in st.session_state.ingested_files:
-            with st.spinner(f"Ingesting `{pdf_file.name}`..."):
+        with st.spinner(f"Ingesting `{pdf_file.name}`..."):
+            try:
                 logger.info(f"Processing `{pdf_file.name}`")
-                text = pdf_bytes_to_text(pdf_file.read())
+                # Read bytes once
+                pdf_bytes = pdf_file.read()
+                if not pdf_bytes:
+                    raise RuntimeError(f"No bytes read from uploaded file {pdf_file.name}")
+
+                # Convert to text and save both the per-file pdf and per-file txt inside .tmp_docling
+                text = pdf_bytes_to_text(pdf_bytes, filename=pdf_file.name)
+
+                # Insert text into RAG
                 insert_text_into_rag(st.session_state.rag, text)
                 st.session_state.ingested_files.add(pdf_file.name)
                 logger.info(f"`{pdf_file.name}` ingested into KB.")
-        else:
-            logger.info(f"`{pdf_file.name}` was already ingested; skipping.")
+            except Exception as e:
+                logger.exception("Failed to ingest %s: %s", pdf_file.name, e)
+                st.error(f"Failed to ingest `{pdf_file.name}`: {e}")
 
     st.success("PDF ingestion complete. You may now ask questions.")
 
@@ -120,7 +162,7 @@ if st.session_state.rag is None and not storages_exist(st.session_state.workdir)
 else:
     # Inform if we found on-disk KB but haven't initialized rag yet
     if st.session_state.rag is None and storages_exist(st.session_state.workdir):
-        st.info("Found an existing KB on disk.")
+        st.info("Found an existing KB on disk. The RAG will be initialized automatically when you run the query.")
 
 query = st.text_area("Enter your question", height=140)
 
