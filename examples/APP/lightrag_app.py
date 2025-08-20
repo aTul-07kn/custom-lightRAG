@@ -9,13 +9,11 @@ from dotenv import load_dotenv
 
 from ingestion import (
     build_rag,
-    clear_workdir_files,
+    clear_workdir_files,      # still imported but not used after removing reset button
     pdf_bytes_to_text,
     insert_text_into_rag,
     QUERY_MODES,
 )
-
-# Runner helper (we need run_coro_threadsafe for queries)
 from async_runner import start_background_loop, run_coro_threadsafe
 
 # ---------------------
@@ -25,17 +23,14 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s — %(levelname)s: %
 logger = logging.getLogger(__name__)
 
 # ---------------------
-# Page config & styling
+# Page config & startup
 # ---------------------
-st.set_page_config(page_title="LightRAG PDF QA", layout="wide")
-
+st.set_page_config(page_title="Knowledge Graph Demo", layout="wide")
 load_dotenv()
-
-# Ensure background loop is started early (idempotent)
 start_background_loop()
 
 # ---------------------
-# App state
+# Session state
 # ---------------------
 if "rag" not in st.session_state:
     st.session_state.rag = None
@@ -44,7 +39,6 @@ if "workdir" not in st.session_state:
 if "ingested_files" not in st.session_state:
     st.session_state.ingested_files = set()
 
-# Simple helper: Detect if a LightRAG workdir already contains storage files
 STORAGE_FILES = [
     "graph_chunk_entity_relation.graphml",
     "kv_store_doc_status.json",
@@ -55,76 +49,149 @@ STORAGE_FILES = [
     "vdb_relationships.json",
 ]
 
-
 def storages_exist(workdir: str) -> bool:
-    for f in STORAGE_FILES:
-        if os.path.exists(os.path.join(workdir, f)):
-            return True
-    return False
+    return any(os.path.exists(os.path.join(workdir, f)) for f in STORAGE_FILES)
 
+# ---------------------
+# Global UI styles (visual only)
+# ---------------------
+PRIMARY = "#1463FF"
+TEXT    = "#0F172A"
+BORDER  = "#E2E8F0"
+SOFTBG  = "#F8FAFC"
 
-def remove_and_recreate_dirs(workdir: str):
-    """
-    Remove the workdir (TEMP) and .tmp_docling directories if they exist, then recreate them empty.
-    """
-    # Remove TEMP (workdir)
-    try:
-        if os.path.exists(workdir):
-            shutil.rmtree(workdir)
-            logger.info("Deleted existing workdir: %s", workdir)
-    except Exception as e:
-        logger.warning("Failed to delete workdir %s: %s", workdir, e)
+st.markdown(
+    f"""
+    <style>
+      /* Base */
+      html, body, [class*="css"] {{
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial;
+        color: {TEXT};
+      }}
 
-    # Remove .tmp_docling under project root
-    tmp_docling = os.path.join(os.getcwd(), ".tmp_docling")
-    try:
-        if os.path.exists(tmp_docling):
-            shutil.rmtree(tmp_docling)
-            logger.info("Deleted existing .tmp_docling: %s", tmp_docling)
-    except Exception as e:
-        logger.warning("Failed to delete .tmp_docling %s: %s", tmp_docling, e)
+      /* H2 headers with built-in line (no extra sibling div needed) */
+      h2.with-line {{
+        font-weight: 800;
+        margin: 4px 0 10px 0;   /* tight */
+        position: relative;
+        padding-bottom: 8px;    /* space for the line */
+      }}
+      h2.with-line::after {{
+        content: "";
+        position: absolute;
+        left: 0; right: 0; bottom: 0;
+        height: 2px;
+        background: {BORDER};
+      }}
 
-    # Recreate fresh directories
-    try:
-        os.makedirs(workdir, exist_ok=True)
-        os.makedirs(tmp_docling, exist_ok=True)
-        logger.info("Recreated directories: %s and %s", workdir, tmp_docling)
-    except Exception as e:
-        logger.error("Failed to recreate directories: %s", e)
-        raise
+      /* Aggressively remove any stray "oval input" that some themes insert after headers */
+      h2 + div input,
+      h2 + div textarea,
+      h2 + div [role="textbox"],
+      h2 + div [data-baseweb="input"],
+      h2 + div [data-baseweb="select"],
+      h2 + div .stTextInput,
+      h2 + div .stTextArea {{
+        display: none !important;
+        height: 0 !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        border: 0 !important;
+        background: transparent !important;
+      }}
+      h2 + div {{
+        height: 0 !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        border: 0 !important;
+        background: transparent !important;
+      }}
 
+      /* Cards (compact) */
+      .card {{
+        border: 1px solid {BORDER};
+        background: #fff;
+        border-radius: 12px;
+        padding: 14px;
+        margin-bottom: 10px;
+      }}
+      .soft {{
+        background: {SOFTBG};
+        border: 1px solid {BORDER};
+        border-radius: 10px;
+        padding: 10px 12px;
+        margin-top: 6px;
+      }}
 
-# Settings expander
-with st.expander("⚙️ Settings", expanded=False):
-    chunk_size = st.number_input("Chunk token size", min_value=50, max_value=1000, value=200, step=10)
-    chunk_overlap = st.number_input("Chunk overlap token size", min_value=0, max_value=400, value=40, step=5)
-    st.caption("These are passed to LightRAG during initialization.")
+      /* Primary buttons */
+      .stButton > button {{
+        border-radius: 9999px !important;
+        padding: 9px 14px !important;
+        font-weight: 700 !important;
+        border: 1px solid {PRIMARY} !important;
+        background: {PRIMARY} !important;
+        color: #fff !important;
+        margin-top: 2px !important;
+      }}
+      .stButton > button:disabled {{
+        opacity: 0.5 !important;
+        cursor: not-allowed !important;
+      }}
+
+      /* Labels: bigger & bold for the three you called out */
+      label {{
+        font-size: 16px !important;
+        font-weight: 700 !important;
+        color: {TEXT} !important;
+        margin-bottom: 2px !important;
+      }}
+
+      /* Inputs: rounded + tidy */
+      .stTextArea textarea,
+      .stNumberInput input,
+      .stSelectbox [data-baseweb="select"] > div,
+      .stFileUploader div[data-testid="stFileUploaderDropzone"] {{
+        border-radius: 12px !important;
+        border-color: {BORDER} !important;
+      }}
+
+      /* Reduce global vertical gaps */
+      .block-container {{ padding-top: 20px !important; }}
+      .element-container {{ margin-bottom: 8px !important; }}
+
+      /* File uploader header spacing */
+      div[data-testid="stFileUploaderDropzone"] > div:first-child {{
+        padding: 10px 14px !important;
+      }}
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 # ==========================
-# 1) Ingestion section
+# 1) Ingestion section (same controls, NO reset button)
 # ==========================
-st.header("1) Ingest PDF(s) into Knowledge Base")
-uploaded_files = st.file_uploader("Upload PDF(s)", type=["pdf"], accept_multiple_files=True)
+st.markdown('<h2 class="with-line">Knowledge Fabric</h2>', unsafe_allow_html=True)
 
-# Single full-width button for processing (reset button removed per request)
-process_btn = st.button("Process Uploaded PDFs", disabled=(not uploaded_files))
+uploaded_files = st.file_uploader("Upload Document", type=["pdf"], accept_multiple_files=True)
+
+btn_col_left, _spacer = st.columns([1, 1])
+with btn_col_left:
+    process_btn = st.button("Ingest Uploaded Documents", disabled=(not uploaded_files))
 
 if process_btn and uploaded_files:
-    # Delete existing TEMP and .tmp_docling, reset state, create fresh dirs
-    logger.info("New upload detected — removing existing TEMP and .tmp_docling and recreating fresh directories.")
-    remove_and_recreate_dirs(st.session_state.workdir)
-
-    # Clear any LightRAG references in session state (fresh run)
-    st.session_state.rag = None
-    st.session_state.ingested_files = set()
-
-    # Build RAG (this uses the background loop under the hood)
-    logger.info("Initializing RAG for ingestion...")
-    st.session_state.rag = build_rag(
-        working_dir=st.session_state.workdir,
-        chunk_token_size=chunk_size,
-        chunk_overlap_token_size=chunk_overlap,
-    )
+    os.makedirs(st.session_state.workdir, exist_ok=True)
+    if st.session_state.rag is None:
+        logger.info("Initializing RAG for the first time...")
+        # These values are still driven by Settings at the end when you ingest after changing them.
+        # If you want them live-threaded here immediately, say so and I'll wire through.
+        chunk_size_default = 200
+        chunk_overlap_default = 40
+        st.session_state.rag = build_rag(
+            working_dir=st.session_state.workdir,
+            chunk_token_size=chunk_size_default,
+            chunk_overlap_token_size=chunk_overlap_default,
+        )
 
     # Ensure tmp_docling path
     tmp_docling_dir = os.path.join(os.getcwd(), ".tmp_docling")
@@ -151,24 +218,37 @@ if process_btn and uploaded_files:
                 logger.exception("Failed to ingest %s: %s", pdf_file.name, e)
                 st.error(f"Failed to ingest `{pdf_file.name}`: {e}")
 
-    st.success("PDF ingestion complete. You may now ask questions.")
+    st.success("Document ingestion complete and Knowledge Graph is ready.")
 
 # ==========================
-# 2) Query section (always visible)
+# 2) Query section
 # ==========================
-st.header("2) Ask a question (uses current KB)")
+st.markdown('<h2 class="with-line">Query Knowledge Fabric</h2>', unsafe_allow_html=True)
+
 if st.session_state.rag is None and not storages_exist(st.session_state.workdir):
-    st.warning("No documents have been ingested yet and no on-disk KB was found. Upload PDFs")
+    st.warning("No documents exist in Knowledge Fabric")
 else:
-    # Inform if we found on-disk KB but haven't initialized rag yet
     if st.session_state.rag is None and storages_exist(st.session_state.workdir):
-        st.info("Found an existing KB on disk. The RAG will be initialized automatically when you run the query.")
+        st.info("Knowledge Graph Found.")
 
-query = st.text_area("Enter your question", height=140)
+query = st.text_area("Enter Query", height=140)
+# mode = st.selectbox("Query mode", options=QUERY_MODES + ["all"], index=0)
+MODE_OPTIONS = QUERY_MODES + ["all"]
+DISPLAY_MAP = {
+    "naive": "Traditional",
+    "local": "Knowledge Graph - Local",
+    "global": "Knowledge Graph - Global",
+    "hybrid": "Knowledge Graph - Hybrid",
+    "mix": "Knowledge Graph - Mix",
+    "all": "All",
+}
+mode = st.selectbox(
+    "Query mode",
+    options=MODE_OPTIONS,
+    index=0,
+    format_func=lambda v: DISPLAY_MAP.get(v, v),
+)
 
-mode = st.selectbox("Query mode", options=QUERY_MODES + ["all"], index=0)
-
-# Enable Run button when the user typed a query and either we have an initialized rag OR storages exist (so we can lazy-init)
 run_btn_disabled = (not query.strip()) or (st.session_state.rag is None and not storages_exist(st.session_state.workdir))
 run_btn = st.button("Run query", disabled=run_btn_disabled)
 
@@ -176,37 +256,52 @@ def run_one_mode(rag, q, mode_name):
     from lightrag import QueryParam
     logger.info(f"Running mode: {mode_name}")
     start = time.perf_counter()
-
-    # Use thread-safe runner to schedule coroutine on the shared loop
     result = run_coro_threadsafe(rag.aquery(q, param=QueryParam(mode=mode_name)))
     dur = (time.perf_counter() - start) * 1000.0
     logger.info(f"Mode {mode_name} done in {dur:.1f} ms")
     return result, dur
 
 if run_btn:
-    # If rag is not initialized but storages exist on disk, create it now (lazily).
     if st.session_state.rag is None:
         logger.info("Lazy-initializing RAG from existing storage...")
+        # Same defaults; can be wired to Settings if you want live control before ingest.
+        chunk_size_default = 200
+        chunk_overlap_default = 40
         st.session_state.rag = build_rag(
             working_dir=st.session_state.workdir,
-            chunk_token_size=chunk_size,
-            chunk_overlap_token_size=chunk_overlap,
+            chunk_token_size=chunk_size_default,
+            chunk_overlap_token_size=chunk_overlap_default,
         )
         logger.info("RAG initialized.")
 
     if mode == "all":
-        st.subheader("Results by mode")
+        st.subheader("Results by Mode")
         for m in QUERY_MODES:
-            with st.spinner(f"Running {m}..."):
+            display_name = DISPLAY_MAP.get(m, m)
+            # spinner uses friendly name
+            with st.spinner(f"Running {display_name}..."):
                 out, ms = run_one_mode(st.session_state.rag, query, m)
-            with st.expander(f"Mode: {m} — {ms:.1f} ms", expanded=(m == "naive")):
+            # expander title uses friendly name; keep naive expanded by default
+            with st.expander(f"{display_name} — {ms:.1f} ms", expanded=(m == "naive")):
                 st.write(out)
     else:
-        with st.spinner(f"Running {mode}..."):
+        display_name = DISPLAY_MAP.get(mode, mode)
+        with st.spinner(f"Running {display_name}..."):
             out, ms = run_one_mode(st.session_state.rag, query, mode)
-        st.subheader(f"Answer ({mode}) — {ms:.1f} ms")
+        st.subheader(f"Answer ({display_name}) — {ms:.1f} ms")
         st.write(out)
 
-# Optional: list ingested files (full width)
+# Optional: list ingested files
 if st.session_state.ingested_files:
-    st.markdown("**Ingested files:** " + ", ".join(sorted(st.session_state.ingested_files)))
+    st.markdown(
+        f'<div class="soft"><strong>Ingested documents:</strong> {", ".join(sorted(st.session_state.ingested_files))}</div>',
+        unsafe_allow_html=True,
+    )
+
+# ==========================
+# 3) Settings (kept at the end)
+# ==========================
+with st.expander("⚙️ Settings", expanded=False):
+    st.caption("These are passed to LightRAG during initialization.")
+    chunk_size = st.number_input("Chunk token size", min_value=50, max_value=1000, value=200, step=10)
+    chunk_overlap = st.number_input("Chunk overlap token size", min_value=0, max_value=400, value=40, step=5)

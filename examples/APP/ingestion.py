@@ -30,7 +30,7 @@ _LR_FILES: List[str] = [
 
 # Expose the supported modes in one place
 QUERY_MODES = ["naive", "local", "global", "hybrid", "mix"]
-
+# QUERY_MODES = ["naive", "local", "hybrid"]
 
 def clear_workdir_files(working_dir: str):
     """Delete LightRAG output files so a fresh ingest can occur."""
@@ -51,6 +51,7 @@ async def _abuild_rag(working_dir: str, chunk_token_size: int, chunk_overlap_tok
         llm_model_func=gpt_4o_mini_complete,
         chunk_token_size=chunk_token_size,
         chunk_overlap_token_size=chunk_overlap_token_size,
+        enable_llm_cache=False
     )
     await rag.initialize_storages()
     await initialize_pipeline_status()
